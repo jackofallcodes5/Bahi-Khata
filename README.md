@@ -4,6 +4,7 @@
 [![Node Version](https://img.shields.io/badge/node-%E2%89%A518.0.0-blue.svg)](#)
 [![React Version](https://img.shields.io/badge/react-18.2.0-blue.svg)](#)
 [![MySQL Version](https://img.shields.io/badge/mysql-8.0-orange.svg)](#)
+[![Supabase](https://img.shields.io/badge/supabase-auth%20%26%20storage-3ECF8E.svg)](#)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](#)
 
 > **Bahi Khata** (Hindi for *Account Ledger Book*) is a full-stack multi-tenant SaaS platform designed to digitise local Indian businesses — grocery stores, milkmen, water jar suppliers, newspaper vendors, maid services, cleaners, cooks, laundries, and tiffin services. 
@@ -45,6 +46,7 @@
 - 📄 **PDF Invoice & Receipt Generator**: Stream formatted, printable PDF tax invoices powered by `PDFKit` directly from backend API endpoints.
 - 🛡️ **Role-Based Access Control (RBAC)**: Enforces 5 distinct roles (`Admin`, `Retail Shop`, `Delivery Business`, `Service Provider`, `Customer`) with JWT token verification.
 - 👑 **Super Admin Management**: Monitor platform revenue volume, registered businesses, user directories, and toggle user active/blocked statuses.
+- ☁️ **Supabase-Backed Auth & File Storage**: User session handling and profile/product image uploads are backed by Supabase, layered on top of the core MySQL data store.
 
 ---
 
@@ -59,8 +61,9 @@
 | **Backend Runtime** | Node.js (≥18) + Express 4 | RESTful MVC API server |
 | **Database Engine** | MySQL 8 | Relational database with InnoDB engine, foreign keys, and transactions |
 | **Database Driver** | `mysql2/promise` | Connection pooling with async/await Promise API |
-| **Authentication** | JSON Web Tokens (`jsonwebtoken`) + `bcrypt` | Signed JWT tokens (`HS256`) and salt-hashed passwords |
-| **Document Generator**| PDFKit (`pdfkit`) | Server-side PDF invoice generation streamed directly to HTTP responses |
+| **Backend-as-a-Service** | **Supabase** | Hosted Postgres project used for **Auth** (session/JWT issuance alongside the app's own JWT layer) and **Storage** (profile photos, product images, PDF invoice archival) |
+| **Authentication** | JSON Web Tokens (`jsonwebtoken`) + `bcrypt` + Supabase Auth | Signed JWT tokens (`HS256`), salt-hashed passwords, and Supabase-managed auth sessions |
+| **Document Generator**| PDFKit (`pdfkit`) | Server-side PDF invoice generation streamed directly to HTTP responses (optionally archived to Supabase Storage) |
 | **Security Controls** | Helmet + `express-rate-limit` | HTTP header security and rate limiting on `/api/*` endpoints |
 
 ---
@@ -74,7 +77,7 @@
                                 +-------------+-------------+
                                               |
                                       HTTP / REST APIs
-                                      (Bearer JWT Auth)
+                                (Bearer JWT / Supabase Auth)
                                               |
                                               v
                                 +-------------+-------------+
@@ -82,19 +85,19 @@
                                 |       Gateway App         |
                                 +-------------+-------------+
                                               |
-                        +---------------------+---------------------+
-                        |                     |                     |
-                        v                     v                     v
-            +-----------+-----------+ +-------+-------+  +----------+----------+
-            |  Auth & Role Control  | | Business Logic|  | PDFKit Document Engine|
-            |  Middleware (JWT)     | |  Controllers  |  |  (PDF Tax Invoices)  |
-            +-----------+-----------+ +-------+-------+  +---------------------+
-                                              |
-                                              v
-                                +-------------+-------------+
-                                |   MySQL 8 Database Pool   |
-                                |  (InnoDB / Transactions)  |
-                                +---------------------------+
+                +---------------------+---------------------+---------------------+
+                |                     |                     |                     |
+                v                     v                     v                     v
+    +-----------+-----------+ +-------+-------+  +----------+----------+ +--------+--------+
+    |  Auth & Role Control  | | Business Logic|  | PDFKit Document Engine| |    Supabase     |
+    |  Middleware (JWT)     | |  Controllers  |  |  (PDF Tax Invoices)  | | (Auth & Storage)|
+    +-----------+-----------+ +-------+-------+  +---------------------+ +--------+--------+
+                                              |                                    |
+                                              v                                    v
+                                +-------------+-------------+          +----------+----------+
+                                |   MySQL 8 Database Pool   |          | Supabase Storage      |
+                                |  (InnoDB / Transactions)  |          | (images / PDF archive)|
+                                +---------------------------+          +-----------------------+
 ```
 
 ---
@@ -109,7 +112,7 @@
   - Post-checkout modal offers an instant **Download Bill (PDF)** button.
 - **Inventory Management** (`/shop/inventory`):
   - Complete catalog management with stock indicators and low-stock warning badges (`<= 10` items).
-  - Add product modal with category allocation and barcode assignment.
+  - Add product modal with category allocation and barcode assignment; product images upload directly to **Supabase Storage**.
 - **Customer Udhar Directory** (`/shop/customers`):
   - View Customer ID badges (`ID: #1`), names, unique phone numbers, and balances.
   - Add Customer modal for quick manual onboarding (name & phone only).
@@ -143,7 +146,7 @@
   - Comprehensive log of past payments across all connected businesses.
   - **Download Receipt (PDF)** button for every completed payment.
 - **Account & Settings** (`/customer/account`):
-  - Edit profile details (name, phone, email, password), manage addresses, and toggle Dark Mode.
+  - Edit profile details (name, phone, email, password), manage addresses, toggle Dark Mode, and update profile photo (stored via **Supabase Storage**).
 
 ### 5. Super Admin Control Panel
 - **Platform Metrics** (`/admin/dashboard`):
@@ -159,7 +162,7 @@
 ### Authentication (`/api/auth`)
 | Method | Endpoint | Access | Description |
 |---|---|---|---|
-| `POST` | `/api/auth/register` | Public | Register new user (`Customer`, `Retail Shop`, `Delivery Business`, `Service Provider`) |
+| `POST` | `/api/auth/register` | Public | Register new user (`Customer`, `Retail Shop`, `Delivery Business`, `Service Provider`); creates a corresponding Supabase Auth user |
 | `POST` | `/api/auth/login` | Public | Authenticate user via phone & password, returns JWT token |
 | `GET` | `/api/auth/me` | Protected | Fetch currently logged-in user profile |
 | `PUT` | `/api/auth/profile` | Protected | Update logged-in user's profile details |
@@ -169,7 +172,7 @@
 |---|---|---|---|
 | `GET` | `/api/shop/dashboard` | Retail Shop | Fetch today's sales revenue, pending Udhar, and low stock count |
 | `GET` | `/api/shop/products` | Retail Shop | Get product catalog with inventory stock levels & categories |
-| `POST` | `/api/shop/products` | Retail Shop | Add new product with barcode, price, and initial stock |
+| `POST` | `/api/shop/products` | Retail Shop | Add new product with barcode, price, initial stock, and optional image uploaded to Supabase Storage |
 | `GET` | `/api/shop/customers` | Retail Shop | Get shop customers with unique Customer ID, phone, and Udhar balance |
 | `POST` | `/api/shop/customers` | Retail Shop | Add / link customer by name & phone number |
 
@@ -178,7 +181,7 @@
 |---|---|---|---|
 | `POST` | `/api/bills` | Retail Shop | Generate POS bill, update inventory, and adjust Udhar credit balance |
 | `GET` | `/api/bills` | Retail Shop | Get invoice history for the shop |
-| `GET` | `/api/bills/:id/pdf` | Protected | Download formatted PDF Tax Invoice generated by PDFKit |
+| `GET` | `/api/bills/:id/pdf` | Protected | Download formatted PDF Tax Invoice generated by PDFKit (archived copy available via Supabase Storage) |
 
 ### Delivery & Service Module (`/api/delivery`)
 | Method | Endpoint | Access | Description |
@@ -210,7 +213,7 @@
 
 ## 🗄 Database Schema & ERD Architecture
 
-The database is built on MySQL 8 using **InnoDB** with strict foreign key constraints and transactional integrity.
+The database is built on MySQL 8 using **InnoDB** with strict foreign key constraints and transactional integrity. Binary assets (profile photos, product images, and archived PDF invoices) are not stored in MySQL — they live in **Supabase Storage**, with MySQL rows holding only the returned Supabase object URL/key.
 
 ```
 +----------------+       +------------------+       +-------------------+
@@ -221,6 +224,8 @@ The database is built on MySQL 8 using **InnoDB** with strict foreign key constr
 | description    |     | | name             |     | | business_name   |
 +----------------+     | | phone (UNIQUE)   |     | +-------------------+
                        | | password_hash    |     
+                       | | supabase_uid     |       (maps to Supabase Auth user)
+                       | | avatar_url       |       (Supabase Storage object URL)
                        | +------------------+       +-------------------+
                        |                            | delivery_business |
                        |                            +-------------------+
@@ -238,18 +243,19 @@ The database is built on MySQL 8 using **InnoDB** with strict foreign key constr
 | id (PK)          |       | id (PK)          |   | id (PK)             |
 | business_user_id | <---+ | business_user_id |   | business_user_id    |
 | name, price      |       | customer_user_id |   | customer_id (FK)    |
-+--------+---------+       | outstanding_bal  |   | product_id (FK)     |
-         |                 +--------+---------+   | qty_per_delivery    |
-         v                          |             +----------+----------+
-+------------------+                |                        |
-|    inventory     |                v                        v
-+------------------+       +------------------+   +---------------------+
-| product_id (FK)  |       |      bills       |   |     attendance      |
-| stock            |       +------------------+   +---------------------+
-| low_stock_thresh |       | id (PK)          |   | subscription_id(FK) |
-+------------------+       | customer_id (FK) |   | date, status        |
-                           | invoice_no       |   | quantity_delivered  |
+| image_url        |       | outstanding_bal  |   | product_id (FK)     |
++--------+---------+       +--------+---------+   | qty_per_delivery    |
+         |                          |             +----------+----------+
+         v                          |                        |
++------------------+                v                        v
+|    inventory     |       +------------------+   +---------------------+
++------------------+       |      bills       |   |     attendance      |
+| product_id (FK)  |       +------------------+   +---------------------+
+| stock            |       | id (PK)          |   | subscription_id(FK) |
+| low_stock_thresh |       | customer_id (FK) |   | date, status        |
++------------------+       | invoice_no       |   | quantity_delivered  |
                            | net_amount       |   +---------------------+
+                           | pdf_storage_key   |   (Supabase Storage key)
                            +--------+---------+
                                     |
                                     v
@@ -270,6 +276,7 @@ The database is built on MySQL 8 using **InnoDB** with strict foreign key constr
 - **Node.js**: `v18.0.0` or higher
 - **npm**: `v9.0.0` or higher
 - **MySQL Server**: `v8.0` or higher (running locally on port `3306`)
+- **Supabase Project**: a free or paid project at [supabase.com](https://supabase.com), used for Auth and Storage
 
 ---
 
@@ -279,6 +286,7 @@ The database is built on MySQL 8 using **InnoDB** with strict foreign key constr
    ```bash
    mysql -u root -p < database/bahikhata.sql
    ```
+3. Create a Supabase project and, inside it, a **Storage bucket** named `bahi-khata-assets` (used for avatars, product images, and archived invoice PDFs).
 
 ---
 
@@ -296,6 +304,11 @@ The database is built on MySQL 8 using **InnoDB** with strict foreign key constr
    DB_NAME=bahikhata
    JWT_SECRET=supersecretjwtkey_bahi_khata_2024
    JWT_EXPIRES_IN=1d
+
+   # Supabase
+   SUPABASE_URL=https://your-project-ref.supabase.co
+   SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+   SUPABASE_STORAGE_BUCKET=bahi-khata-assets
    ```
 3. Start the backend development server:
    ```bash
@@ -310,7 +323,13 @@ The database is built on MySQL 8 using **InnoDB** with strict foreign key constr
    ```bash
    cd frontend
    ```
-2. Start the Vite development server:
+2. Verify environment settings in `frontend/.env`:
+   ```env
+   VITE_API_BASE_URL=http://localhost:5000
+   VITE_SUPABASE_URL=https://your-project-ref.supabase.co
+   VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+   ```
+3. Start the Vite development server:
    ```bash
    npm run dev
    ```
@@ -365,6 +384,7 @@ Bills generated via POS checkout or Service Bill calculation can be downloaded a
 4. Streamed back with HTTP headers:
    `Content-Type: application/pdf`
    `Content-Disposition: attachment; filename=Invoice_INV-1723812345.pdf`
+5. Optionally, the same buffer is uploaded to the `bahi-khata-assets` bucket in **Supabase Storage** for long-term archival, and the returned object key is saved to the `bills.pdf_storage_key` column.
 
 ---
 
@@ -372,6 +392,7 @@ Bills generated via POS checkout or Service Bill calculation can be downloaded a
 
 - **JWT Authentication**: Secured with secret key hashing (`HS256`) and expiration token lifecycle.
 - **Password Security**: Passwords salt-hashed with `bcrypt` (cost factor 10).
+- **Supabase Auth & Storage Access**: Backend calls to Supabase use the **service role key** (kept server-side only, never exposed to the frontend); the frontend uses the restricted **anon key** with row-level security rules on the storage bucket.
 - **SQL Injection Prevention**: All MySQL database queries use prepared parameterized statements (`pool.execute(query, [params])`).
 - **Database Transactions**: Multi-step bill generation, stock deduction, and balance updates run inside strict MySQL `connection.beginTransaction()` and `connection.commit()` wrappers with automatic rollback on error.
 - **Security Headers & Rate Limiting**: `helmet` guards HTTP response headers and `express-rate-limit` prevents brute-force login attempts.
@@ -381,7 +402,7 @@ Bills generated via POS checkout or Service Bill calculation can be downloaded a
 ## 🚀 Production Deployment Guide
 
 ### Option 1: Docker Compose (Recommended)
-Build and spin up backend API, frontend web app, and MySQL 8 database in isolated containers:
+Build and spin up backend API, frontend web app, and MySQL 8 database in isolated containers (Supabase remains a managed cloud service and is not containerized locally):
 ```bash
 docker-compose up -d --build
 ```
@@ -398,6 +419,7 @@ docker-compose up -d --build
    npm run build
    ```
 3. Configure **NGINX** to serve static files from `frontend/dist` and reverse-proxy `/api` traffic to `http://localhost:5000`.
+4. Ensure production `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` (backend) and `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` (frontend) environment variables point to your production Supabase project.
 
 ---
 
