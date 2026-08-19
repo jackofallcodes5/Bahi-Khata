@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import axios from 'axios';
+import axios from '../utils/axiosInstance';
 import { useAuth } from '../contexts/AuthContext';
 import { MdClose, MdPerson, MdEmail, MdPhone } from 'react-icons/md';
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import axios from '../../utils/axiosInstance';
 import { MdCalendarMonth, MdPauseCircle, MdAddCircle, MdCheckCircle, MdOutlineLocalShipping } from 'react-icons/md';
 
 const CustomerServices = () => {

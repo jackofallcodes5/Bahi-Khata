@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import axios from '../../utils/axiosInstance';
 import { MdPayment, MdCheckCircle, MdStorefront, MdArrowForward, MdAccountBalance } from 'react-icons/md';
 
 const CustomerHome = () => {

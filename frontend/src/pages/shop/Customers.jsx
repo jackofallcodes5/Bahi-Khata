@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import axios from '../../utils/axiosInstance';
 import { MdSearch, MdPhone, MdPerson, MdAdd, MdEmail, MdPeople, MdAccountBalanceWallet, MdWarning, MdCheckCircle } from 'react-icons/md';
 
 const Customers = () => {

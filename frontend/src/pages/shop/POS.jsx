@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import axios from '../../utils/axiosInstance';
 import { MdSearch, MdDownload, MdPerson, MdCheckCircle, MdPhone, MdInfoOutline, MdShoppingCart, MdAdd, MdRemove, MdClose, MdQrCodeScanner } from 'react-icons/md';
 
 const POS = () => {

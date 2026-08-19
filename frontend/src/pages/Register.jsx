@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import axios from 'axios';
+import axios from '../../utils/axiosInstance';
 import { useNavigate, Link } from 'react-router-dom';
 import { MdStorefront, MdPerson, MdPhone, MdLock, MdEmail, MdBusiness, MdArrowForward } from 'react-icons/md';
 

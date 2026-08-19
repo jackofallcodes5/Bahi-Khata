@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import axios from '../../utils/axiosInstance';
 import { MdReceiptLong, MdCheckCircle, MdPayment, MdHistory } from 'react-icons/md';
 
 const CustomerPayments = () => {
@@ -22,7 +22,8 @@ const CustomerPayments = () => {
 
   const handleDownloadReceipt = (billId) => {
     if (!billId) return alert('No invoice attached to this transaction receipt.');
-    window.open(`/api/bills/${billId}/pdf`, '_blank');
+    const base = import.meta.env.VITE_API_URL || '';
+    window.open(`${base}/api/bills/${billId}/pdf`, '_blank');
   };
 
   return (

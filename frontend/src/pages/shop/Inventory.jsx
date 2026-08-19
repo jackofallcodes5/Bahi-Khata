@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import axios from '../../utils/axiosInstance';
 import { MdAdd, MdSearch, MdWarning, MdCheckCircle, MdInventory, MdCategory, MdErrorOutline } from 'react-icons/md';
 
 const Inventory = () => {

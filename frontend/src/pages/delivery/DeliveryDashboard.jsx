@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import axios from '../../utils/axiosInstance';
 import { MdCheckCircle, MdLocalShipping, MdPeople, MdLogout, MdAdd, MdCalculate, MdDownload, MdReceipt, MdSearch, MdCalendarToday, MdWarning, MdRoute, MdCheck } from 'react-icons/md';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';

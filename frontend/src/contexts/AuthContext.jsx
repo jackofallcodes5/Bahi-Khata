@@ -1,5 +1,5 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
-import axios from 'axios';
+import axios from '../utils/axiosInstance';
 import { jwtDecode } from 'jwt-decode';
 
 const AuthContext = createContext();
@@ -21,7 +21,7 @@ export const AuthProvider = ({ children }) => {
           setLoading(false);
           return;
         }
-        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+        // token is picked up automatically by the axiosInstance interceptor
         // Fetch full profile so name/email/phone are available after refresh
         axios.get('/api/auth/me')
           .then(res => {
@@ -30,7 +30,7 @@ export const AuthProvider = ({ children }) => {
           })
           .catch(() => {
             localStorage.removeItem('token');
-            delete axios.defaults.headers.common['Authorization'];
+            // token removed from localStorage; interceptor will no longer attach it
           })
           .finally(() => setLoading(false));
       } catch (err) {
@@ -46,7 +46,7 @@ export const AuthProvider = ({ children }) => {
     const res = await axios.post('/api/auth/login', { phone, password });
     const { token, data } = res.data;
     localStorage.setItem('token', token);
-    axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    // token stored in localStorage; interceptor picks it up on next request
     setUser({ id: data.id, role: data.role, name: data.name, email: data.email, phone: data.phone, profile_pic: data.profile_pic });
     return data;
   };
@@ -57,7 +57,7 @@ export const AuthProvider = ({ children }) => {
 
   const logout = () => {
     localStorage.removeItem('token');
-    delete axios.defaults.headers.common['Authorization'];
+    // token removed from localStorage; interceptor will no longer attach it
     setUser(null);
   };
 
