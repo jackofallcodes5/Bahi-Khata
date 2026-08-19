@@ -1,444 +1,417 @@
--- Bahi Khata Database Schema
+-- ============================================================
+-- BAHIKHATA SCHEMA — PostgreSQL / Supabase version
+-- Converted from Cassandra CQL to a normalized relational design
+-- ============================================================
 
-CREATE DATABASE IF NOT EXISTS bahikhata;
-USE bahikhata;
+-- Supabase enables pgcrypto by default (for gen_random_uuid()).
+-- If not enabled, uncomment the line below:
+-- create extension if not exists pgcrypto;
 
-SET FOREIGN_KEY_CHECKS = 0;
+-- ============================================================
+-- ROLES
+-- ============================================================
 
--- Drop tables if they exist
-DROP TABLE IF EXISTS activity_logs;
-DROP TABLE IF EXISTS societies;
-DROP TABLE IF EXISTS zones;
-DROP TABLE IF EXISTS companies;
-DROP TABLE IF EXISTS holidays;
-DROP TABLE IF EXISTS delivery_requests;
-DROP TABLE IF EXISTS payment_history;
-DROP TABLE IF EXISTS notifications;
-DROP TABLE IF EXISTS attendance;
-DROP TABLE IF EXISTS subscription_days;
-DROP TABLE IF EXISTS subscriptions;
-DROP TABLE IF EXISTS service_business;
-DROP TABLE IF EXISTS delivery_business;
-DROP TABLE IF EXISTS payments;
-DROP TABLE IF EXISTS bill_items;
-DROP TABLE IF EXISTS bills;
-DROP TABLE IF EXISTS inventory;
-DROP TABLE IF EXISTS products;
-DROP TABLE IF EXISTS categories;
-DROP TABLE IF EXISTS customers;
-DROP TABLE IF EXISTS customer_groups;
-DROP TABLE IF EXISTS shops;
-DROP TABLE IF EXISTS addresses;
-DROP TABLE IF EXISTS roles;
-DROP TABLE IF EXISTS users;
-
-SET FOREIGN_KEY_CHECKS = 1;
-
--- 1. Roles
-CREATE TABLE roles (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(50) NOT NULL UNIQUE,
-    description TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+create table if not exists roles (
+    id uuid primary key default gen_random_uuid(),
+    name text not null unique,
+    description text,
+    created_at timestamptz not null default now()
 );
 
--- 2. Users
-CREATE TABLE users (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    role_id INT NOT NULL,
-    name VARCHAR(100) NOT NULL,
-    email VARCHAR(100) UNIQUE,
-    phone VARCHAR(20) UNIQUE NOT NULL,
-    password VARCHAR(255) NOT NULL,
-    profile_pic VARCHAR(255),
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (role_id) REFERENCES roles(id)
-);
-CREATE INDEX idx_users_phone ON users(phone);
-CREATE INDEX idx_users_email ON users(email);
+-- Seed default roles
+insert into roles (name, description) values
+('Customer', 'Consumer user purchasing products or daily services'),
+('Retail Shop', 'Local Kirana / Retail shop merchant'),
+('Delivery Business', 'Milk / Newspaper / Water daily delivery business'),
+('Service Provider', 'Daily service provider merchant'),
+('Admin', 'Platform super administrator')
+on conflict (name) do nothing;
 
--- 3. Addresses
-CREATE TABLE addresses (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
-    type VARCHAR(50) DEFAULT 'Home', -- Home, Work, Shop
-    address_line TEXT NOT NULL,
-    society VARCHAR(100),
-    building VARCHAR(50),
-    floor VARCHAR(20),
-    house_no VARCHAR(20),
-    zone VARCHAR(100),
-    city VARCHAR(100),
-    state VARCHAR(100),
-    pincode VARCHAR(20),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+-- ============================================================
+-- USERS
+-- ============================================================
+
+create table if not exists users (
+    id uuid primary key default gen_random_uuid(),
+    role_id uuid references roles(id) on delete set null,
+    name text not null,
+    email text unique,
+    phone text unique,
+    password_hash text not null,
+    profile_pic text,
+    is_active boolean not null default true,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
 );
 
--- 4. Shops (Retail)
-CREATE TABLE shops (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
-    business_name VARCHAR(150) NOT NULL,
-    gst_no VARCHAR(50),
-    is_approved BOOLEAN DEFAULT FALSE,
-    qr_code VARCHAR(255),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+create index if not exists idx_users_role_id on users(role_id);
+
+-- ============================================================
+-- ADDRESSES
+-- ============================================================
+
+create table if not exists addresses (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid not null references users(id) on delete cascade,
+    type text,
+    address_line text,
+    society text,
+    building text,
+    floor text,
+    house_no text,
+    zone text,
+    city text,
+    state text,
+    pincode text,
+    created_at timestamptz not null default now()
 );
 
--- 5. Delivery Business
-CREATE TABLE delivery_business (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
-    business_name VARCHAR(150) NOT NULL,
-    vehicle_no VARCHAR(50),
-    is_approved BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+create index if not exists idx_addresses_user_id on addresses(user_id);
+
+-- ============================================================
+-- SHOPS
+-- ============================================================
+
+create table if not exists shops (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid not null unique references users(id) on delete cascade,
+    business_name text not null,
+    gst_no text,
+    is_approved boolean not null default false,
+    qr_code text,
+    created_at timestamptz not null default now()
 );
 
--- 6. Service Provider Business
-CREATE TABLE service_business (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
-    business_name VARCHAR(150) NOT NULL,
-    service_type VARCHAR(100), -- Maid, Cleaner, Cook, etc.
-    is_approved BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+-- ============================================================
+-- DELIVERY BUSINESS
+-- ============================================================
+
+create table if not exists delivery_business (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid not null unique references users(id) on delete cascade,
+    business_name text not null,
+    vehicle_no text,
+    is_approved boolean not null default false,
+    created_at timestamptz not null default now()
 );
 
--- 7. Customer Groups
-CREATE TABLE customer_groups (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    business_user_id INT NOT NULL,
-    name VARCHAR(100) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (business_user_id) REFERENCES users(id) ON DELETE CASCADE
+-- ============================================================
+-- SERVICE BUSINESS
+-- ============================================================
+
+create table if not exists service_business (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid not null unique references users(id) on delete cascade,
+    business_name text not null,
+    service_type text,
+    is_approved boolean not null default false,
+    created_at timestamptz not null default now()
 );
 
--- 8. Customers (Mapping of a User to a Business)
-CREATE TABLE customers (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    business_user_id INT NOT NULL, -- Shop/Delivery/Service User ID
-    customer_user_id INT NOT NULL, -- Global User ID for the customer
-    group_id INT,
-    credit_limit DECIMAL(10, 2) DEFAULT 0.00,
-    outstanding_balance DECIMAL(10, 2) DEFAULT 0.00,
-    notes TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (business_user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (customer_user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (group_id) REFERENCES customer_groups(id) ON DELETE SET NULL,
-    UNIQUE(business_user_id, customer_user_id)
+-- ============================================================
+-- CUSTOMER GROUPS
+-- ============================================================
+
+create table if not exists customer_groups (
+    id uuid primary key default gen_random_uuid(),
+    business_user_id uuid not null references users(id) on delete cascade,
+    name text not null,
+    created_at timestamptz not null default now()
 );
 
--- 9. Categories
-CREATE TABLE categories (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    business_user_id INT NOT NULL,
-    name VARCHAR(100) NOT NULL,
-    description TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (business_user_id) REFERENCES users(id) ON DELETE CASCADE
+create index if not exists idx_customer_groups_business on customer_groups(business_user_id);
+
+-- ============================================================
+-- CUSTOMERS
+-- ============================================================
+
+create table if not exists customers (
+    id uuid primary key default gen_random_uuid(),
+    business_user_id uuid not null references users(id) on delete cascade,
+    customer_user_id uuid references users(id) on delete set null,
+    group_id uuid references customer_groups(id) on delete set null,
+    customer_name text not null,
+    customer_phone text,
+    customer_email text,
+    credit_limit decimal(12,2) default 0,
+    outstanding_balance decimal(12,2) default 0,
+    notes text,
+    created_at timestamptz not null default now()
 );
 
--- 10. Products
-CREATE TABLE products (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    business_user_id INT NOT NULL,
-    category_id INT,
-    name VARCHAR(150) NOT NULL,
-    description TEXT,
-    barcode VARCHAR(100),
-    price DECIMAL(10, 2) NOT NULL,
-    cost_price DECIMAL(10, 2),
-    is_active BOOLEAN DEFAULT TRUE,
-    image_url VARCHAR(255),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (business_user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
-);
-CREATE INDEX idx_products_barcode ON products(barcode);
+create index if not exists idx_customers_business on customers(business_user_id);
+create index if not exists idx_customers_user on customers(customer_user_id);
+create index if not exists idx_customers_group on customers(group_id);
 
--- 11. Inventory
-CREATE TABLE inventory (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    product_id INT NOT NULL,
-    stock INT DEFAULT 0,
-    low_stock_threshold INT DEFAULT 5,
-    last_restocked_at TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+-- ============================================================
+-- CATEGORIES
+-- ============================================================
+
+create table if not exists categories (
+    id uuid primary key default gen_random_uuid(),
+    business_user_id uuid not null references users(id) on delete cascade,
+    name text not null,
+    description text,
+    created_at timestamptz not null default now()
 );
 
--- 12. Bills
-CREATE TABLE bills (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    business_user_id INT NOT NULL,
-    customer_id INT, -- NULL for walk-in customers
-    invoice_no VARCHAR(50) NOT NULL,
-    total_amount DECIMAL(10, 2) NOT NULL,
-    tax_amount DECIMAL(10, 2) DEFAULT 0.00,
-    discount_amount DECIMAL(10, 2) DEFAULT 0.00,
-    net_amount DECIMAL(10, 2) NOT NULL,
-    payment_status ENUM('Pending', 'Paid', 'Cancelled') DEFAULT 'Pending',
-    payment_method ENUM('Cash', 'UPI', 'Udhar', 'Card') DEFAULT 'Cash',
-    pdf_url VARCHAR(255),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (business_user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL
-);
-CREATE INDEX idx_bills_invoice_no ON bills(invoice_no);
+create index if not exists idx_categories_business on categories(business_user_id);
 
--- 13. Bill Items
-CREATE TABLE bill_items (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    bill_id INT NOT NULL,
-    product_id INT,
-    product_name VARCHAR(150) NOT NULL, -- Keep name in case product is deleted
-    quantity DECIMAL(10, 2) NOT NULL,
-    price DECIMAL(10, 2) NOT NULL,
-    tax DECIMAL(10, 2) DEFAULT 0.00,
-    total DECIMAL(10, 2) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE,
-    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
+-- ============================================================
+-- PRODUCTS
+-- ============================================================
+
+create table if not exists products (
+    id uuid primary key default gen_random_uuid(),
+    business_user_id uuid not null references users(id) on delete cascade,
+    category_id uuid references categories(id) on delete set null,
+    name text not null,
+    description text,
+    barcode text,
+    price decimal(12,2) not null default 0,
+    cost_price decimal(12,2) default 0,
+    is_active boolean not null default true,
+    image_url text,
+    created_at timestamptz not null default now()
 );
 
--- 14. Payments / Payment History
-CREATE TABLE payments (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    business_user_id INT NOT NULL,
-    customer_id INT,
-    bill_id INT, -- Can be NULL if it's a generic Udhar payment
-    amount DECIMAL(10, 2) NOT NULL,
-    payment_method ENUM('Cash', 'UPI', 'Bank Transfer') NOT NULL,
-    status ENUM('Pending', 'Completed', 'Failed') DEFAULT 'Completed',
-    transaction_id VARCHAR(100),
-    receipt_url VARCHAR(255),
-    notes TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (business_user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
-    FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE SET NULL
+create index if not exists idx_products_business on products(business_user_id);
+create index if not exists idx_products_category on products(category_id);
+create unique index if not exists uq_products_business_barcode
+    on products(business_user_id, barcode) where barcode is not null;
+
+-- ============================================================
+-- INVENTORY
+-- ============================================================
+
+create table if not exists inventory (
+    product_id uuid primary key references products(id) on delete cascade,
+    business_user_id uuid not null references users(id) on delete cascade,
+    stock int not null default 0,
+    low_stock_threshold int default 0,
+    last_restocked_at timestamptz,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
 );
 
--- 15. Subscriptions (For Delivery/Services)
-CREATE TABLE subscriptions (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    business_user_id INT NOT NULL,
-    customer_id INT NOT NULL,
-    product_id INT, -- E.g., Milk variant, Water Jar
-    service_name VARCHAR(100), -- If it's a generic service
-    start_date DATE NOT NULL,
-    end_date DATE,
-    frequency ENUM('Everyday', 'Alternate Days', 'Custom', 'Weekly', 'Monthly') DEFAULT 'Everyday',
-    delivery_days VARCHAR(255) DEFAULT 'Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday',
-    status ENUM('Active', 'Paused', 'Cancelled') DEFAULT 'Active',
-    quantity_per_delivery DECIMAL(10, 2) DEFAULT 1,
-    paused_until DATE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (business_user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
-    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
+create index if not exists idx_inventory_business on inventory(business_user_id);
+
+-- ============================================================
+-- BILLS
+-- ============================================================
+
+create table if not exists bills (
+    id uuid primary key default gen_random_uuid(),
+    business_user_id uuid not null references users(id) on delete cascade,
+    customer_id uuid references customers(id) on delete set null,
+    invoice_no text not null,
+    total_amount decimal(12,2) not null default 0,
+    tax_amount decimal(12,2) default 0,
+    discount_amount decimal(12,2) default 0,
+    net_amount decimal(12,2) not null default 0,
+    payment_status text not null default 'pending',
+    payment_method text,
+    pdf_url text,
+    created_at timestamptz not null default now()
 );
 
--- Temp Bills (For bills issued to unregistered phone numbers)
-CREATE TABLE IF NOT EXISTS temp_bills (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    business_user_id INT NOT NULL,
-    phone VARCHAR(20) NOT NULL,
-    invoice_no VARCHAR(100) NOT NULL,
-    total_amount DECIMAL(10, 2) NOT NULL,
-    discount_amount DECIMAL(10, 2) DEFAULT 0.00,
-    net_amount DECIMAL(10, 2) NOT NULL,
-    payment_status ENUM('Paid', 'Pending') DEFAULT 'Pending',
-    payment_method ENUM('Cash', 'UPI', 'Card', 'Udhar') NOT NULL,
-    items_json TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (business_user_id) REFERENCES users(id) ON DELETE CASCADE
+create unique index if not exists uq_bills_business_invoice
+    on bills(business_user_id, invoice_no);
+create index if not exists idx_bills_customer on bills(business_user_id, customer_id, created_at desc);
+
+-- ============================================================
+-- BILL ITEMS
+-- ============================================================
+
+create table if not exists bill_items (
+    id uuid primary key default gen_random_uuid(),
+    bill_id uuid not null references bills(id) on delete cascade,
+    product_id uuid references products(id) on delete set null,
+    product_name text not null,
+    quantity decimal(12,3) not null default 1,
+    price decimal(12,2) not null default 0,
+    tax decimal(12,2) default 0,
+    total decimal(12,2) not null default 0,
+    created_at timestamptz not null default now()
 );
 
--- 16. Subscription Days (For custom frequency)
-CREATE TABLE subscription_days (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    subscription_id INT NOT NULL,
-    day_of_week ENUM('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday') NOT NULL,
-    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE
+create index if not exists idx_bill_items_bill on bill_items(bill_id);
+
+-- ============================================================
+-- PAYMENTS
+-- ============================================================
+
+create table if not exists payments (
+    id uuid primary key default gen_random_uuid(),
+    business_user_id uuid not null references users(id) on delete cascade,
+    customer_id uuid references customers(id) on delete set null,
+    bill_id uuid references bills(id) on delete set null,
+    amount decimal(12,2) not null,
+    payment_method text,
+    status text not null default 'pending',
+    transaction_id text,
+    receipt_url text,
+    notes text,
+    created_at timestamptz not null default now()
 );
 
--- 17. Attendance (Daily tracking for deliveries and services)
-CREATE TABLE attendance (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    subscription_id INT NOT NULL,
-    date DATE NOT NULL,
-    status ENUM('Delivered', 'Missed', 'Holiday', 'Waiting Confirmation') DEFAULT 'Delivered',
-    quantity_delivered DECIMAL(10, 2),
-    photo_proof VARCHAR(255),
-    notes TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE,
-    UNIQUE(subscription_id, date)
+create index if not exists idx_payments_customer on payments(business_user_id, customer_id, created_at desc);
+create index if not exists idx_payments_bill on payments(bill_id);
+
+-- ============================================================
+-- SUBSCRIPTIONS
+-- ============================================================
+
+create table if not exists subscriptions (
+    id uuid primary key default gen_random_uuid(),
+    business_user_id uuid not null references users(id) on delete cascade,
+    customer_id uuid references customers(id) on delete cascade,
+    product_id uuid references products(id) on delete set null,
+    service_name text,
+    start_date date,
+    end_date date,
+    frequency text,
+    status text not null default 'active',
+    quantity_per_delivery decimal(12,3) default 1,
+    paused_until date,
+    created_at timestamptz not null default now()
 );
 
--- 18. Delivery Requests (Extra/Skip)
-CREATE TABLE delivery_requests (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    subscription_id INT NOT NULL,
-    request_type ENUM('Extra', 'Skip') NOT NULL,
-    request_date DATE NOT NULL,
-    quantity DECIMAL(10, 2) DEFAULT 0, -- Relevant for 'Extra'
-    status ENUM('Pending', 'Approved', 'Rejected') DEFAULT 'Pending',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE
+create index if not exists idx_subscriptions_business on subscriptions(business_user_id);
+create index if not exists idx_subscriptions_customer on subscriptions(business_user_id, customer_id);
+
+create table if not exists subscription_days (
+    subscription_id uuid not null references subscriptions(id) on delete cascade,
+    day_of_week text not null check (day_of_week in
+        ('monday','tuesday','wednesday','thursday','friday','saturday','sunday')),
+    primary key (subscription_id, day_of_week)
 );
 
--- 19. Notifications
-CREATE TABLE notifications (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
-    title VARCHAR(100) NOT NULL,
-    message TEXT NOT NULL,
-    is_read BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+-- ============================================================
+-- ATTENDANCE
+-- ============================================================
+
+create table if not exists attendance (
+    id uuid primary key default gen_random_uuid(),
+    subscription_id uuid not null references subscriptions(id) on delete cascade,
+    business_user_id uuid not null references users(id) on delete cascade,
+    customer_id uuid references customers(id) on delete set null,
+    attendance_date date not null,
+    status text not null,
+    quantity_delivered decimal(12,3) default 0,
+    photo_proof text,
+    notes text,
+    created_at timestamptz not null default now(),
+    unique (subscription_id, attendance_date)
 );
 
--- 20. Holidays
-CREATE TABLE holidays (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    business_user_id INT NOT NULL,
-    date DATE NOT NULL,
-    reason VARCHAR(255),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (business_user_id) REFERENCES users(id) ON DELETE CASCADE
+create index if not exists idx_attendance_business_date on attendance(business_user_id, attendance_date);
+
+-- ============================================================
+-- DELIVERY REQUESTS
+-- ============================================================
+
+create table if not exists delivery_requests (
+    id uuid primary key default gen_random_uuid(),
+    subscription_id uuid not null references subscriptions(id) on delete cascade,
+    request_date date not null,
+    request_type text,
+    quantity decimal(12,3),
+    status text not null default 'pending',
+    created_at timestamptz not null default now()
 );
 
--- Hierarchy for routing
--- 21. Companies
-CREATE TABLE companies (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+create index if not exists idx_delivery_requests_sub on delivery_requests(subscription_id, request_date);
+
+-- ============================================================
+-- TEMP BILLS
+-- ============================================================
+
+create table if not exists temp_bills (
+    id uuid primary key default gen_random_uuid(),
+    business_user_id uuid not null references users(id) on delete cascade,
+    phone text,
+    invoice_no text,
+    total_amount decimal(12,2) default 0,
+    discount_amount decimal(12,2) default 0,
+    net_amount decimal(12,2) default 0,
+    payment_status text default 'pending',
+    payment_method text,
+    items_json jsonb,
+    created_at timestamptz not null default now()
 );
 
--- 22. Zones
-CREATE TABLE zones (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    company_id INT,
-    name VARCHAR(100) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE SET NULL
+create index if not exists idx_temp_bills_business on temp_bills(business_user_id);
+
+-- ============================================================
+-- NOTIFICATIONS
+-- ============================================================
+
+create table if not exists notifications (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid not null references users(id) on delete cascade,
+    title text,
+    message text,
+    is_read boolean not null default false,
+    created_at timestamptz not null default now()
 );
 
--- 23. Societies
-CREATE TABLE societies (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    zone_id INT,
-    name VARCHAR(150) NOT NULL,
-    address TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (zone_id) REFERENCES zones(id) ON DELETE SET NULL
+create index if not exists idx_notifications_user on notifications(user_id, created_at desc);
+
+-- ============================================================
+-- HOLIDAYS
+-- ============================================================
+
+create table if not exists holidays (
+    id uuid primary key default gen_random_uuid(),
+    business_user_id uuid not null references users(id) on delete cascade,
+    holiday_date date not null,
+    reason text,
+    created_at timestamptz not null default now()
 );
 
--- 24. Activity Logs
-CREATE TABLE activity_logs (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
-    action VARCHAR(100) NOT NULL,
-    details TEXT,
-    ip_address VARCHAR(50),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+create index if not exists idx_holidays_business_date on holidays(business_user_id, holiday_date);
+
+-- ============================================================
+-- COMPANIES / ZONES / SOCIETIES
+-- ============================================================
+
+create table if not exists companies (
+    id uuid primary key default gen_random_uuid(),
+    name text not null,
+    created_at timestamptz not null default now()
 );
 
+create table if not exists zones (
+    id uuid primary key default gen_random_uuid(),
+    company_id uuid not null references companies(id) on delete cascade,
+    name text not null,
+    created_at timestamptz not null default now()
+);
 
--- ====================================================
--- SEED DATA
--- ====================================================
+create index if not exists idx_zones_company on zones(company_id);
 
--- Roles
-INSERT INTO roles (id, name, description) VALUES
-(1, 'Admin', 'Platform Administrator'),
-(2, 'Customer', 'End user consuming services'),
-(3, 'Retail Shop', 'Grocery, General Store'),
-(4, 'Delivery Business', 'Milk, Water, Newspaper'),
-(5, 'Service Provider', 'Maid, Cleaner, Cook');
+create table if not exists societies (
+    id uuid primary key default gen_random_uuid(),
+    zone_id uuid not null references zones(id) on delete cascade,
+    name text not null,
+    address text,
+    created_at timestamptz not null default now()
+);
 
--- Users (Password is 'password123' hashed with bcrypt for all users: $2a$10$wE9v.yC6.3t/L6PzB/lS..XwzP4uO81qgN2c3.zC.8eF3S0wV6B4C )
--- For dummy data simplicity in SQL, we will insert raw passwords if hash is too complex to generate here, but let's insert a standard hash for 'password123'
--- Hash for 'password123' -> $2a$10$C8.m0vL5O.cM.GzE7j3fH.cQ/QzY0.C/c.M.Z.0.Z.M.Z.0.Z.M.Z.0. (Using a dummy valid-looking bcrypt hash for example, actual hash is $2b$10$y58f3v76lE/Q1L26x58p..QO1n03L5/Kq8m.pT46R5K3y4Y2tD5cK )
--- Actually I will use a real hash for '123456': $2b$10$zE9k9R6wT6H/c.M4I.mQoeP3B2oJ1G2QG1J5W.R8C4w2Z9N4B6T4u
+create index if not exists idx_societies_zone on societies(zone_id);
 
-INSERT INTO users (id, role_id, name, email, phone, password) VALUES
-(1, 1, 'Super Admin', 'admin@bahikhata.com', '9999999999', '$2b$10$zE9k9R6wT6H/c.M4I.mQoeP3B2oJ1G2QG1J5W.R8C4w2Z9N4B6T4u'),
-(2, 3, 'Ramesh Grocery', 'ramesh@grocery.com', '8888888888', '$2b$10$zE9k9R6wT6H/c.M4I.mQoeP3B2oJ1G2QG1J5W.R8C4w2Z9N4B6T4u'),
-(3, 4, 'Suresh Milkman', 'suresh@milk.com', '7777777777', '$2b$10$zE9k9R6wT6H/c.M4I.mQoeP3B2oJ1G2QG1J5W.R8C4w2Z9N4B6T4u'),
-(4, 5, 'Kamala Maid', 'kamala@maid.com', '6666666666', '$2b$10$zE9k9R6wT6H/c.M4I.mQoeP3B2oJ1G2QG1J5W.R8C4w2Z9N4B6T4u'),
-(5, 2, 'Rahul Customer', 'rahul@gmail.com', '5555555555', '$2b$10$zE9k9R6wT6H/c.M4I.mQoeP3B2oJ1G2QG1J5W.R8C4w2Z9N4B6T4u');
+-- ============================================================
+-- ACTIVITY LOGS
+-- ============================================================
 
--- Addresses
-INSERT INTO addresses (user_id, type, address_line, city, state, pincode) VALUES
-(1, 'Work', 'Admin HQ', 'Delhi', 'Delhi', '110001'),
-(2, 'Shop', 'Shop No 4, Main Market', 'Mumbai', 'MH', '400001'),
-(3, 'Work', 'Milk Dairy, Sector 12', 'Pune', 'MH', '411012'),
-(4, 'Work', 'Shivaji Nagar', 'Pune', 'MH', '411005'),
-(5, 'Home', 'Flat 101, Galaxy Apt', 'Mumbai', 'MH', '400001');
+create table if not exists activity_logs (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid not null references users(id) on delete cascade,
+    action text,
+    details text,
+    ip_address text,
+    created_at timestamptz not null default now()
+);
 
--- Business Profiles
-INSERT INTO shops (user_id, business_name, is_approved) VALUES (2, 'Ramesh Kirana Store', TRUE);
-INSERT INTO delivery_business (user_id, business_name, vehicle_no, is_approved) VALUES (3, 'Suresh Daily Needs', 'MH12 AB 1234', TRUE);
-INSERT INTO service_business (user_id, business_name, service_type, is_approved) VALUES (4, 'Kamala Cleaning Services', 'Maid', TRUE);
-
--- Customers Mapping
--- Rahul is a customer of Ramesh, Suresh, and Kamala
-INSERT INTO customers (business_user_id, customer_user_id, outstanding_balance) VALUES
-(2, 5, 150.00),
-(3, 5, 0.00),
-(4, 5, 500.00);
-
--- Categories & Products (For Shop)
-INSERT INTO categories (id, business_user_id, name) VALUES
-(1, 2, 'Dal & Pulses'),
-(2, 2, 'Snacks');
-
-INSERT INTO products (id, business_user_id, category_id, name, price, barcode) VALUES
-(1, 2, 1, 'Toor Dal 1kg', 160.00, '123456789012'),
-(2, 2, 2, 'Lays Magic Masala', 20.00, '987654321098');
-
-INSERT INTO inventory (product_id, stock) VALUES (1, 50), (2, 100);
-
--- Products (For Delivery)
-INSERT INTO products (id, business_user_id, name, price) VALUES
-(3, 3, 'Cow Milk 1L', 60.00);
-
--- Bills (Shop)
-INSERT INTO bills (id, business_user_id, customer_id, invoice_no, total_amount, net_amount, payment_method, payment_status) VALUES
-(1, 2, 1, 'INV-001', 180.00, 180.00, 'Udhar', 'Pending');
-
-INSERT INTO bill_items (bill_id, product_id, product_name, quantity, price, total) VALUES
-(1, 1, 'Toor Dal 1kg', 1, 160.00, 160.00),
-(1, 2, 'Lays Magic Masala', 1, 20.00, 20.00);
-
--- Subscriptions (Delivery)
-INSERT INTO subscriptions (id, business_user_id, customer_id, product_id, start_date, frequency, status, quantity_per_delivery) VALUES
-(1, 3, 2, 3, '2023-10-01', 'Everyday', 'Active', 2); -- Rahul gets 2L milk everyday from Suresh
-
--- Attendance (Delivery)
-INSERT INTO attendance (subscription_id, date, status, quantity_delivered) VALUES
-(1, '2023-10-01', 'Delivered', 2),
-(1, '2023-10-02', 'Delivered', 2);
-
--- Service Subscriptions (Maid)
-INSERT INTO subscriptions (id, business_user_id, customer_id, service_name, start_date, frequency, status, quantity_per_delivery) VALUES
-(2, 4, 3, 'Monthly Cleaning', '2023-10-01', 'Monthly', 'Active', 1);
-
--- Payments
-INSERT INTO payments (business_user_id, customer_id, amount, payment_method, status) VALUES
-(2, 1, 50.00, 'Cash', 'Completed');
-
+create index if not exists idx_activity_logs_user on activity_logs(user_id, created_at desc);

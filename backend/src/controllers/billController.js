@@ -2,25 +2,6 @@ const pool = require('../config/db');
 const PDFDocument = require('pdfkit');
 const bcrypt = require('bcrypt');
 
-// Helper to ensure temp_bills table exists
-const ensureTempBillsTable = async (connection) => {
-    await connection.execute(`
-        CREATE TABLE IF NOT EXISTS temp_bills (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            business_user_id INT NOT NULL,
-            phone VARCHAR(20) NOT NULL,
-            invoice_no VARCHAR(100) NOT NULL,
-            total_amount DECIMAL(10, 2) NOT NULL,
-            discount_amount DECIMAL(10, 2) DEFAULT 0.00,
-            net_amount DECIMAL(10, 2) NOT NULL,
-            payment_status ENUM('Paid', 'Pending') DEFAULT 'Pending',
-            payment_method ENUM('Cash', 'UPI', 'Card', 'Udhar') NOT NULL,
-            items_json TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    `);
-};
-
 // @desc    Generate a new bill (POS)
 // @route   POST /api/bills
 // @access  Private (Retail Shop)
@@ -28,7 +9,6 @@ exports.generateBill = async (req, res, next) => {
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
-        await ensureTempBillsTable(connection);
 
         const { customer_id, customer_phone, customer_name, items, payment_method, discount_amount } = req.body;
         
@@ -46,7 +26,7 @@ exports.generateBill = async (req, res, next) => {
         // Check if customer phone is provided and whether it exists in users table
         if (customer_phone && customer_phone.trim() !== '') {
             const cleanPhone = customer_phone.trim();
-            const [users] = await connection.execute('SELECT id, name FROM users WHERE phone = ?', [cleanPhone]);
+            const [users] = await connection.execute('SELECT id, name, email FROM users WHERE phone = ?', [cleanPhone]);
 
             if (users.length === 0) {
                 // UNREGISTERED PHONE NUMBER -> Save bill in temp_bills staging table
@@ -85,7 +65,8 @@ exports.generateBill = async (req, res, next) => {
             }
 
             // REGISTERED USER -> Auto-find/create mapping in customers table
-            const customerUserId = users[0].id;
+            const userObj = users[0];
+            const customerUserId = userObj.id;
             const [mapping] = await connection.execute(
                 'SELECT id FROM customers WHERE business_user_id = ? AND customer_user_id = ?',
                 [businessUserId, customerUserId]
@@ -96,10 +77,10 @@ exports.generateBill = async (req, res, next) => {
                 resolvedCustomerId = mapping[0].id;
             } else {
                 const [newMapping] = await connection.execute(
-                    'INSERT INTO customers (business_user_id, customer_user_id, outstanding_balance) VALUES (?, ?, 0.00)',
-                    [businessUserId, customerUserId]
+                    'INSERT INTO customers (business_user_id, customer_user_id, customer_name, customer_phone, customer_email, outstanding_balance) VALUES (?, ?, ?, ?, ?, 0.00)',
+                    [businessUserId, customerUserId, customer_name || userObj.name, cleanPhone, userObj.email || null]
                 );
-                resolvedCustomerId = newMapping.insertId;
+                resolvedCustomerId = newMapping.insertId || newMapping.id;
             }
 
             // Insert Standard Bill
@@ -108,7 +89,7 @@ exports.generateBill = async (req, res, next) => {
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
                 [businessUserId, resolvedCustomerId, invoice_no, total_amount, discount_amount || 0, net_amount, payment_status, payment_method]
             );
-            const billId = billResult.insertId;
+            const billId = billResult.insertId || billResult.id;
 
             // Insert Bill Items and Update Inventory
             for (let item of items) {
@@ -155,7 +136,7 @@ exports.generateBill = async (req, res, next) => {
              VALUES (?, NULL, ?, ?, ?, ?, ?, ?)`,
             [businessUserId, invoice_no, total_amount, discount_amount || 0, net_amount, payment_status, payment_method]
         );
-        const billId = billResult.insertId;
+        const billId = billResult.insertId || billResult.id;
 
         for (let item of items) {
             const itemTotal = item.price * item.quantity;
@@ -193,7 +174,7 @@ exports.generateBill = async (req, res, next) => {
 exports.getBills = async (req, res, next) => {
     try {
         const [bills] = await pool.execute(
-            `SELECT b.*, u.name as customer_name, u.phone as customer_phone 
+            `SELECT b.*, COALESCE(c.customer_name, u.name) as customer_name, COALESCE(c.customer_phone, u.phone) as customer_phone 
              FROM bills b 
              LEFT JOIN customers c ON b.customer_id = c.id
              LEFT JOIN users u ON c.customer_user_id = u.id
@@ -214,7 +195,7 @@ exports.downloadBillPDF = async (req, res, next) => {
     try {
         const billId = req.params.id;
         const [bills] = await pool.execute(
-            `SELECT b.*, u.name as customer_name, u.phone as customer_phone, s.business_name
+            `SELECT b.*, COALESCE(c.customer_name, u.name) as customer_name, COALESCE(c.customer_phone, u.phone) as customer_phone, s.business_name
              FROM bills b 
              LEFT JOIN customers c ON b.customer_id = c.id
              LEFT JOIN users u ON c.customer_user_id = u.id

@@ -36,12 +36,12 @@ exports.registerUser = async (req, res, next) => {
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
 
-        // Insert User
+        // Insert User using password_hash column
         const [userResult] = await pool.execute(
-            'INSERT INTO users (role_id, name, email, phone, password) VALUES (?, ?, ?, ?, ?)',
+            'INSERT INTO users (role_id, name, email, phone, password_hash) VALUES (?, ?, ?, ?, ?)',
             [roleId, name, email || null, phone, hashedPassword]
         );
-        const userId = userResult.insertId;
+        const userId = userResult.insertId || userResult.id;
 
         // Handle Business specific tables
         if (roleName === 'Retail Shop') {
@@ -55,23 +55,6 @@ exports.registerUser = async (req, res, next) => {
         // Auto-link any staged bills in temp_bills for this newly registered phone number
         if (roleName === 'Customer') {
             try {
-                // Ensure temp_bills table exists
-                await pool.execute(`
-                    CREATE TABLE IF NOT EXISTS temp_bills (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        business_user_id INT NOT NULL,
-                        phone VARCHAR(20) NOT NULL,
-                        invoice_no VARCHAR(100) NOT NULL,
-                        total_amount DECIMAL(10, 2) NOT NULL,
-                        discount_amount DECIMAL(10, 2) DEFAULT 0.00,
-                        net_amount DECIMAL(10, 2) NOT NULL,
-                        payment_status ENUM('Paid', 'Pending') DEFAULT 'Pending',
-                        payment_method ENUM('Cash', 'UPI', 'Card', 'Udhar') NOT NULL,
-                        items_json TEXT NOT NULL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                `);
-
                 const [tempBills] = await pool.execute('SELECT * FROM temp_bills WHERE phone = ?', [phone]);
 
                 for (let temp of tempBills) {
@@ -85,10 +68,10 @@ exports.registerUser = async (req, res, next) => {
                         customerId = mapping[0].id;
                     } else {
                         const [newMapping] = await pool.execute(
-                            'INSERT INTO customers (business_user_id, customer_user_id, outstanding_balance) VALUES (?, ?, 0.00)',
-                            [temp.business_user_id, userId]
+                            'INSERT INTO customers (business_user_id, customer_user_id, customer_name, customer_phone, customer_email, outstanding_balance) VALUES (?, ?, ?, ?, ?, 0.00)',
+                            [temp.business_user_id, userId, name, phone, email || null]
                         );
-                        customerId = newMapping.insertId;
+                        customerId = newMapping.insertId || newMapping.id;
                     }
 
                     const [billRes] = await pool.execute(
@@ -96,10 +79,10 @@ exports.registerUser = async (req, res, next) => {
                          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
                         [temp.business_user_id, customerId, temp.invoice_no, temp.total_amount, temp.discount_amount, temp.net_amount, temp.payment_status, temp.payment_method]
                     );
-                    const billId = billRes.insertId;
+                    const billId = billRes.insertId || billRes.id;
 
                     let items = [];
-                    try { items = JSON.parse(temp.items_json); } catch (e) {}
+                    try { items = typeof temp.items_json === 'string' ? JSON.parse(temp.items_json) : temp.items_json; } catch (e) {}
 
                     for (let item of items) {
                         await pool.execute(
@@ -147,7 +130,7 @@ exports.loginUser = async (req, res, next) => {
         }
 
         const [users] = await pool.execute(
-            'SELECT u.*, r.name as roleName FROM users u JOIN roles r ON u.role_id = r.id WHERE u.phone = ?',
+            'SELECT u.*, r.name as "roleName" FROM users u JOIN roles r ON u.role_id = r.id WHERE u.phone = ?',
             [phone]
         );
 
@@ -157,7 +140,7 @@ exports.loginUser = async (req, res, next) => {
 
         const user = users[0];
 
-        const isMatch = await bcrypt.compare(password, user.password);
+        const isMatch = await bcrypt.compare(password, user.password_hash);
         if (!isMatch) {
             return res.status(401).json({ success: false, message: 'Invalid credentials' });
         }
@@ -210,7 +193,7 @@ exports.updateProfile = async (req, res, next) => {
         await pool.execute(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, values);
 
         const [updated] = await pool.execute(
-            'SELECT u.id, u.name, u.email, u.phone, u.profile_pic, r.name as roleName FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = ?',
+            'SELECT u.id, u.name, u.email, u.phone, u.profile_pic, r.name as "roleName" FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = ?',
             [userId]
         );
 
@@ -226,7 +209,7 @@ exports.updateProfile = async (req, res, next) => {
 exports.getMe = async (req, res, next) => {
     try {
         const [users] = await pool.execute(
-            'SELECT u.id, u.name, u.email, u.phone, u.profile_pic, r.name as roleName FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = ?',
+            'SELECT u.id, u.name, u.email, u.phone, u.profile_pic, r.name as "roleName" FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = ?',
             [req.user.id]
         );
 

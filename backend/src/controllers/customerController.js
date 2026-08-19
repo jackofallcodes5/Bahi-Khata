@@ -77,7 +77,7 @@ exports.getCustomerSubscriptions = async (req, res, next) => {
         
         const [subscriptions] = await pool.execute(
             `SELECT s.*, p.name as product_name, u.name as business_name,
-                    (SELECT status FROM attendance WHERE subscription_id = s.id AND date = CURDATE()) as today_status
+                    (SELECT status FROM attendance WHERE subscription_id = s.id AND attendance_date = CURRENT_DATE LIMIT 1) as today_status
              FROM subscriptions s
              JOIN customers c ON s.customer_id = c.id
              JOIN users u ON s.business_user_id = u.id
@@ -194,7 +194,7 @@ exports.requestExtra = async (req, res, next) => {
 
         await pool.execute(
             `INSERT INTO delivery_requests (subscription_id, request_type, request_date, quantity, status) 
-             VALUES (?, 'Extra', CURDATE(), ?, 'Approved')`,
+             VALUES (?, 'Extra', CURRENT_DATE, ?, 'Approved')`,
             [id, extra_quantity || 1]
         );
 

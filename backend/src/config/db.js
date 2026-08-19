@@ -49,7 +49,8 @@ async function executeQuery(executor, sql, params = []) {
     if (isInsert) {
         const insertedRow = res.rows[0] || {};
         const header = {
-            insertId: insertedRow.id !== undefined ? Number(insertedRow.id) : 0,
+            insertId: insertedRow.id !== undefined ? insertedRow.id : null,
+            id: insertedRow.id !== undefined ? insertedRow.id : null,
             affectedRows: res.rowCount || 0,
             ...insertedRow
         };

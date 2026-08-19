@@ -11,7 +11,7 @@ exports.getDashboardStats = async (req, res, next) => {
         // Today's Revenue
         const [todayBills] = await pool.execute(
             `SELECT COALESCE(SUM(net_amount), 0) as revenue FROM bills 
-             WHERE business_user_id = ? AND DATE(created_at) = CURDATE()`,
+             WHERE business_user_id = ? AND DATE(created_at) = CURRENT_DATE`,
             [businessUserId]
         );
 
@@ -75,11 +75,11 @@ exports.addProduct = async (req, res, next) => {
             'INSERT INTO products (business_user_id, category_id, name, price, barcode) VALUES (?, ?, ?, ?, ?)',
             [req.user.id, category_id || null, name, price, barcode || null]
         );
-        const productId = productResult.insertId;
+        const productId = productResult.insertId || productResult.id;
 
         await connection.execute(
-            'INSERT INTO inventory (product_id, stock, low_stock_threshold) VALUES (?, ?, ?)',
-            [productId, stock || 0, low_stock_threshold || 5]
+            'INSERT INTO inventory (product_id, business_user_id, stock, low_stock_threshold) VALUES (?, ?, ?, ?)',
+            [productId, req.user.id, stock || 0, low_stock_threshold || 5]
         );
 
         await connection.commit();
@@ -99,11 +99,11 @@ exports.getShopCustomers = async (req, res, next) => {
     try {
         const [customers] = await pool.execute(
             `SELECT c.id as id, c.id as customer_id, c.customer_user_id, c.outstanding_balance, 
-                    u.id as user_id, u.name, u.phone, u.email 
+                    u.id as user_id, COALESCE(c.customer_name, u.name) as name, COALESCE(c.customer_phone, u.phone) as phone, COALESCE(c.customer_email, u.email) as email 
              FROM customers c 
-             JOIN users u ON c.customer_user_id = u.id 
+             LEFT JOIN users u ON c.customer_user_id = u.id 
              WHERE c.business_user_id = ?
-             ORDER BY c.id ASC`,
+             ORDER BY c.created_at ASC`,
             [req.user.id]
         );
         res.status(200).json({ success: true, data: customers });
@@ -136,17 +136,17 @@ exports.addShopCustomer = async (req, res, next) => {
         } else {
             // Get Customer Role ID
             const [roles] = await connection.execute('SELECT id FROM roles WHERE name = ?', ['Customer']);
-            const roleId = roles.length > 0 ? roles[0].id : 2;
+            const roleId = roles.length > 0 ? roles[0].id : null;
 
             // Default hashed password for auto-created customer
             const salt = await bcrypt.genSalt(10);
             const hashedPassword = await bcrypt.hash('password123', salt);
 
             const [newUser] = await connection.execute(
-                'INSERT INTO users (role_id, name, email, phone, password) VALUES (?, ?, ?, ?, ?)',
+                'INSERT INTO users (role_id, name, email, phone, password_hash) VALUES (?, ?, ?, ?, ?)',
                 [roleId, name, email || null, phone, hashedPassword]
             );
-            customerUserId = newUser.insertId;
+            customerUserId = newUser.insertId || newUser.id;
         }
 
         // Check if already mapped
@@ -160,10 +160,10 @@ exports.addShopCustomer = async (req, res, next) => {
             customerId = existingMapping[0].id;
         } else {
             const [newCustomer] = await connection.execute(
-                'INSERT INTO customers (business_user_id, customer_user_id, outstanding_balance) VALUES (?, ?, 0.00)',
-                [businessUserId, customerUserId]
+                'INSERT INTO customers (business_user_id, customer_user_id, customer_name, customer_phone, customer_email, outstanding_balance) VALUES (?, ?, ?, ?, ?, 0.00)',
+                [businessUserId, customerUserId, name, phone, email || null]
             );
-            customerId = newCustomer.insertId;
+            customerId = newCustomer.insertId || newCustomer.id;
         }
 
         await connection.commit();

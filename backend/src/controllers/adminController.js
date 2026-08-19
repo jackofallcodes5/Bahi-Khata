@@ -31,7 +31,7 @@ exports.getAdminStats = async (req, res, next) => {
 exports.getAdminUsers = async (req, res, next) => {
     try {
         const [users] = await pool.execute(`
-            SELECT u.id, u.name, u.email, u.phone, r.name as roleName, u.is_active, u.created_at
+            SELECT u.id, u.name, u.email, u.phone, r.name as "roleName", u.is_active, u.created_at
             FROM users u
             JOIN roles r ON u.role_id = r.id
             ORDER BY u.created_at DESC

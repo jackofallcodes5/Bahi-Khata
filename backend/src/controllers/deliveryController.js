@@ -9,13 +9,13 @@ exports.getTodaysRoute = async (req, res, next) => {
         const todayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
         
         const [routeData] = await pool.execute(
-            `SELECT s.id as subscription_id, s.quantity_per_delivery, s.service_name, s.delivery_days, p.name as product_name, p.price as unit_price,
-                    c.id as customer_id, u.name as customer_name, u.phone as customer_phone, 
+            `SELECT s.id as subscription_id, s.quantity_per_delivery, s.service_name, p.name as product_name, p.price as unit_price,
+                    c.id as customer_id, COALESCE(c.customer_name, u.name) as customer_name, COALESCE(c.customer_phone, u.phone) as customer_phone, 
                     a.address_line,
-                    (SELECT status FROM attendance WHERE subscription_id = s.id AND date = CURDATE()) as today_status
+                    (SELECT status FROM attendance WHERE subscription_id = s.id AND attendance_date = CURRENT_DATE LIMIT 1) as today_status
              FROM subscriptions s
              JOIN customers c ON s.customer_id = c.id
-             JOIN users u ON c.customer_user_id = u.id
+             LEFT JOIN users u ON c.customer_user_id = u.id
              LEFT JOIN addresses a ON u.id = a.user_id AND a.type = 'Home'
              LEFT JOIN products p ON s.product_id = p.id
              WHERE s.business_user_id = ? 
@@ -23,14 +23,7 @@ exports.getTodaysRoute = async (req, res, next) => {
             [businessUserId]
         );
 
-        // Filter route list so ONLY customers scheduled for today's day of week appear
-        const todaysFilteredRoute = routeData.filter(s => {
-            if (!s.delivery_days || s.delivery_days.trim() === '') return true;
-            const scheduledDays = s.delivery_days.split(',').map(d => d.trim().toLowerCase());
-            return scheduledDays.includes(todayName.toLowerCase());
-        });
-
-        res.status(200).json({ success: true, data: todaysFilteredRoute, today: todayName });
+        res.status(200).json({ success: true, data: routeData, today: todayName });
     } catch (error) {
         next(error);
     }
@@ -42,12 +35,17 @@ exports.getTodaysRoute = async (req, res, next) => {
 exports.markAttendance = async (req, res, next) => {
     try {
         const { subscription_id, status, quantity_delivered, notes } = req.body;
+        const businessUserId = req.user.id;
+
+        // Fetch sub to get customer_id
+        const [subs] = await pool.execute('SELECT customer_id FROM subscriptions WHERE id = ?', [subscription_id]);
+        const customerId = subs.length > 0 ? subs[0].customer_id : null;
         
         await pool.execute(
-            `INSERT INTO attendance (subscription_id, date, status, quantity_delivered, notes) 
-             VALUES (?, CURDATE(), ?, ?, ?)
-             ON DUPLICATE KEY UPDATE status = VALUES(status), quantity_delivered = VALUES(quantity_delivered), notes = VALUES(notes)`,
-            [subscription_id, status, quantity_delivered, notes || null]
+            `INSERT INTO attendance (subscription_id, business_user_id, customer_id, attendance_date, status, quantity_delivered, notes) 
+             VALUES (?, ?, ?, CURRENT_DATE, ?, ?, ?)
+             ON CONFLICT (subscription_id, attendance_date) DO UPDATE SET status = EXCLUDED.status, quantity_delivered = EXCLUDED.quantity_delivered, notes = EXCLUDED.notes`,
+            [subscription_id, businessUserId, customerId, status, quantity_delivered || 1, notes || null]
         );
 
         res.status(200).json({ success: true, message: 'Attendance updated successfully' });
@@ -62,16 +60,18 @@ exports.markAttendance = async (req, res, next) => {
 exports.getDeliveryCustomers = async (req, res, next) => {
     try {
         const [customers] = await pool.execute(
-            `SELECT s.id as subscription_id, s.quantity_per_delivery, s.frequency, s.delivery_days, s.status as sub_status, s.service_name,
+            `SELECT s.id as subscription_id, s.quantity_per_delivery, s.frequency, s.status as sub_status, s.service_name,
                     c.id as customer_id, c.outstanding_balance,
-                    u.name as customer_name, u.phone as customer_phone, u.email as customer_email,
+                    COALESCE(c.customer_name, u.name) as customer_name, 
+                    COALESCE(c.customer_phone, u.phone) as customer_phone, 
+                    COALESCE(c.customer_email, u.email) as customer_email,
                     p.id as product_id, p.name as product_name, p.price as unit_price
              FROM subscriptions s
              JOIN customers c ON s.customer_id = c.id
-             JOIN users u ON c.customer_user_id = u.id 
+             LEFT JOIN users u ON c.customer_user_id = u.id 
              LEFT JOIN products p ON s.product_id = p.id
              WHERE s.business_user_id = ?
-             ORDER BY s.id DESC`,
+             ORDER BY s.created_at DESC`,
             [req.user.id]
         );
         res.status(200).json({ success: true, data: customers });
@@ -97,7 +97,7 @@ exports.addDeliveryCustomer = async (req, res, next) => {
         const cleanPhone = phone.trim();
 
         // Strict Registration Check: Phone MUST exist in users table
-        const [existingUsers] = await connection.execute('SELECT id, name FROM users WHERE phone = ?', [cleanPhone]);
+        const [existingUsers] = await connection.execute('SELECT id, name, email FROM users WHERE phone = ?', [cleanPhone]);
 
         if (existingUsers.length === 0) {
             await connection.rollback();
@@ -121,10 +121,10 @@ exports.addDeliveryCustomer = async (req, res, next) => {
             customerId = existingMapping[0].id;
         } else {
             const [newCustomer] = await connection.execute(
-                'INSERT INTO customers (business_user_id, customer_user_id, outstanding_balance) VALUES (?, ?, 0.00)',
-                [businessUserId, customerUserId]
+                'INSERT INTO customers (business_user_id, customer_user_id, customer_name, customer_phone, customer_email, outstanding_balance) VALUES (?, ?, ?, ?, ?, 0.00)',
+                [businessUserId, customerUserId, customerName, cleanPhone, existingUsers[0].email || null]
             );
-            customerId = newCustomer.insertId;
+            customerId = newCustomer.insertId || newCustomer.id;
         }
 
         // Check or create product/service
@@ -141,23 +141,35 @@ exports.addDeliveryCustomer = async (req, res, next) => {
                 'INSERT INTO products (business_user_id, name, price) VALUES (?, ?, ?)',
                 [businessUserId, service_name, unit_price]
             );
-            productId = newProduct.insertId;
+            productId = newProduct.insertId || newProduct.id;
         }
 
         const selectedDays = delivery_days || 'Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday';
 
         // Create Subscription
         const [newSub] = await connection.execute(
-            `INSERT INTO subscriptions (business_user_id, customer_id, product_id, service_name, start_date, frequency, delivery_days, status, quantity_per_delivery) 
-             VALUES (?, ?, ?, ?, CURDATE(), ?, ?, 'Active', ?)`,
-            [businessUserId, customerId, productId, service_name, frequency || 'Everyday', selectedDays, quantity_per_delivery || 1]
+            `INSERT INTO subscriptions (business_user_id, customer_id, product_id, service_name, start_date, frequency, status, quantity_per_delivery) 
+             VALUES (?, ?, ?, ?, CURRENT_DATE, ?, 'Active', ?)`,
+            [businessUserId, customerId, productId, service_name, frequency || 'Everyday', quantity_per_delivery || 1]
         );
+        const subId = newSub.insertId || newSub.id;
+
+        // Insert days into subscription_days
+        const dayList = selectedDays.split(',').map(d => d.trim().toLowerCase());
+        for (let day of dayList) {
+            if (['monday','tuesday','wednesday','thursday','friday','saturday','sunday'].includes(day)) {
+                await connection.execute(
+                    'INSERT INTO subscription_days (subscription_id, day_of_week) VALUES (?, ?) ON CONFLICT DO NOTHING',
+                    [subId, day]
+                );
+            }
+        }
 
         await connection.commit();
         res.status(201).json({
             success: true,
             message: 'Service subscription created successfully',
-            data: { subscription_id: newSub.insertId, customer_id: customerId, name: customerName, phone: cleanPhone, service_name, unit_price, delivery_days: selectedDays }
+            data: { subscription_id: subId, customer_id: customerId, name: customerName, phone: cleanPhone, service_name, unit_price, delivery_days: selectedDays }
         });
     } catch (error) {
         await connection.rollback();
@@ -179,10 +191,10 @@ exports.calculateAndGenerateBill = async (req, res, next) => {
 
         // Fetch subscription details
         const [subs] = await connection.execute(
-            `SELECT s.*, p.price as unit_price, p.name as product_name, c.id as customer_id, u.name as customer_name, u.phone as customer_phone
+            `SELECT s.*, p.price as unit_price, p.name as product_name, c.id as customer_id, COALESCE(c.customer_name, u.name) as customer_name, COALESCE(c.customer_phone, u.phone) as customer_phone
              FROM subscriptions s
              JOIN customers c ON s.customer_id = c.id
-             JOIN users u ON c.customer_user_id = u.id
+             LEFT JOIN users u ON c.customer_user_id = u.id
              LEFT JOIN products p ON s.product_id = p.id
              WHERE s.id = ? AND s.business_user_id = ?`,
             [subscription_id, businessUserId]
@@ -203,8 +215,8 @@ exports.calculateAndGenerateBill = async (req, res, next) => {
             [subscription_id]
         );
 
-        const daysDelivered = attendanceStats[0].days_delivered;
-        let totalDeliveredQty = parseFloat(attendanceStats[0].total_delivered_qty);
+        const daysDelivered = parseInt(attendanceStats[0].days_delivered || 0);
+        let totalDeliveredQty = parseFloat(attendanceStats[0].total_delivered_qty || 0);
 
         if (daysDelivered === 0) {
             totalDeliveredQty = parseFloat(sub.quantity_per_delivery || 1) * 30;
@@ -219,7 +231,7 @@ exports.calculateAndGenerateBill = async (req, res, next) => {
              VALUES (?, ?, ?, ?, 0.00, ?, 'Pending', 'Udhar')`,
             [businessUserId, sub.customer_id, invoice_no, calculatedAmount, calculatedAmount]
         );
-        const billId = billResult.insertId;
+        const billId = billResult.insertId || billResult.id;
 
         // Insert Bill Item
         await connection.execute(
