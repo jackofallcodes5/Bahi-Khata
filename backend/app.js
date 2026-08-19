@@ -15,7 +15,7 @@ app.use(cors({
     const allowed = [
       /^http:\/\/localhost:\d+$/,
       /^http:\/\/127\.0\.0\.1:\d+$/,
-      /^https:\/\/.*\.vercel\.app$/,
+      /^https:\/\/.*\.netlify\.app$/,
     ];
     if (allowed.some((pattern) => pattern.test(origin))) {
       return callback(null, true);
