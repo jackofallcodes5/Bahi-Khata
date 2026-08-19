@@ -22,9 +22,9 @@ It simplifies business management by replacing paper registers with:
 
 | Tier | Component | Platform / Host | Technology Stack | Live URL |
 |---|---|---|---|---|
-| **Front-End** | Client SPA | **Netlify** | React 18, Vite 5, Tailwind CSS | [https://bahikhata123.netlify.app/](https://bahikhata123.netlify.app/) |
-| **Back-End** | REST API Server | **Render** | Node.js, Express 5, JWT, PDFKit | `https://bahi-khata-car8.onrender.com` |
-| **Database** | Relational Database | **Supabase** | PostgreSQL 15+ (Transaction Pooler) | `aws-1-ap-south-1.pooler.supabase.com` |
+| **Front-End** | Client SPA | **Netlify** | React 18, Vite 5, Tailwind CSS |
+| **Back-End** | REST API Server | **Render** | Node.js, Express 5, JWT, PDFKit |
+| **Database** | Relational Database | **Supabase** | PostgreSQL 15+ (Transaction Pooler) |
 
 ---
 
